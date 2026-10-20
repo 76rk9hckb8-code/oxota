@@ -1,5 +1,5 @@
 // Сервис-воркер: приложение и карта работают без интернета
-const APP = "app-v3";
+const APP = "app-v4";
 const TILES = "tiles-v1";
 const APP_FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png",
@@ -32,12 +32,14 @@ self.addEventListener("fetch", e => {
   if (isTile(url)) {
     e.respondWith(caches.open(TILES).then(async c => {
       const hit = await c.match(req.url);
-      if (hit) return hit;
+      // старые «непрозрачные» копии не годятся для запросов с CORS (слой дорог) — перекачиваем
+      if (hit && !(hit.type === "opaque" && req.mode === "cors")) return hit;
       try {
         const res = await fetch(req);
         if (res.ok || res.type === "opaque") c.put(req.url, res.clone());
         return res;
       } catch {
+        if (hit) return hit;
         return new Response("", { status: 504 });
       }
     }));

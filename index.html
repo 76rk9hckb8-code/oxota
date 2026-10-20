@@ -79,6 +79,20 @@
   dialog input,dialog select{width:100%;padding:10px;border-radius:10px;border:1px solid #ffffff22;background:var(--panel2);color:var(--text);font:inherit}
   dialog .row{margin-top:16px}
 
+  /* поиск */
+  #search{position:fixed;left:12px;right:12px;top:calc(10px + var(--safe-t));z-index:2500;
+    background:var(--panel);border-radius:14px;box-shadow:0 4px 14px #0008;display:none;max-height:70vh;overflow:auto}
+  #search.show{display:block}
+  #search .sbar{display:flex;gap:6px;padding:8px;position:sticky;top:0;background:var(--panel)}
+  #sq{flex:1;min-width:0;padding:11px 12px;border-radius:10px;border:1px solid #ffffff22;background:var(--panel2);
+    color:var(--text);font:inherit;font-size:16px}
+  #sClose{background:var(--panel2);border-radius:10px;width:44px}
+  .sr{display:block;width:100%;text-align:left;background:none;padding:10px 14px;border-top:1px solid #ffffff12}
+  .sr small{display:block;color:var(--muted);font-size:12.5px}
+  .shint{padding:6px 14px 12px;font-size:13px;color:var(--muted)}
+  .pp b{font-size:15px}
+  .pp .c{font-family:ui-monospace,Menlo,monospace;font-size:13px;margin:4px 0}
+  .pp button{background:#eee;border:0;border-radius:8px;padding:6px 9px;margin:4px 4px 0 0;font-size:13px;color:#222}
   #toast{position:fixed;left:50%;bottom:calc(90px + var(--safe-b));transform:translateX(-50%);z-index:3000;
     background:#000c;padding:10px 16px;border-radius:12px;font-size:14px;display:none;max-width:90vw;text-align:center}
 
@@ -101,9 +115,18 @@
 </div>
 
 <div id="fab">
+  <button class="fb" id="bSearch" title="Поиск">🔍</button>
   <button class="fb" id="bLayer" title="Подложка">🗺️</button>
   <button class="fb" id="bFollow" title="Следовать за мной"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
   <button class="fb" id="bMenu" title="Меню">☰</button>
+</div>
+
+<div id="search">
+  <div class="sbar">
+    <input id="sq" type="search" enterkeyhint="search" autocomplete="off" placeholder="Село, город или координаты">
+    <button id="sClose" aria-label="Закрыть">✕</button>
+  </div>
+  <div id="sres"></div>
 </div>
 
 <div id="backdrop"></div>
@@ -210,10 +233,54 @@ const TPL = {
     ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
   ]
 };
+/* Слой дорог и подписей: где на сильном приближении данных нет (фрагмент пустой
+   или не загрузился), берём фрагмент с уровня крупнее и растягиваем —
+   так дороги и названия не пропадают при увеличении. */
+const FallbackOverlay = L.GridLayer.extend({
+  options: {maxZoom:19, maxDepth:4, minFallbackZoom:13},
+  initialize(url, opts){ this._tpl = url; L.setOptions(this, opts); },
+  createTile(coords, done){
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    const self = this;
+    function attempt(k){
+      const z = coords.z - k, x = coords.x >> k, y = coords.y >> k;
+      const canGoUp = k < self.options.maxDepth && z - 1 >= self.options.minFallbackZoom;
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        if(canGoUp && isEmptyImg(img)) return attempt(k + 1);
+        const s = 256 / (1 << k);
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(img, (coords.x - (x << k)) * s, (coords.y - (y << k)) * s, s, s, 0, 0, 256, 256);
+        done(null, canvas);
+      };
+      img.onerror = () => canGoUp ? attempt(k + 1) : done(null, canvas);
+      img.src = L.Util.template(self._tpl, {z, x, y});
+    }
+    attempt(0);
+    return canvas;
+  }
+});
+const probe = document.createElement("canvas"); probe.width = probe.height = 64;
+const probeCtx = probe.getContext("2d", {willReadFrequently:true});
+function isEmptyImg(img){
+  try{
+    probeCtx.clearRect(0, 0, 64, 64);
+    probeCtx.drawImage(img, 0, 0, 64, 64);
+    const d = probeCtx.getImageData(0, 0, 64, 64).data;
+    for(let i = 3; i < d.length; i += 4) if(d[i] > 10) return false;
+    return true;
+  }catch{ return false; }
+}
 const layers = {
   "Схема": L.tileLayer(TPL["Схема"][0], {maxZoom:19, attribution:"© OpenStreetMap"}),
-  "Гибрид": L.layerGroup(TPL["Гибрид"].map((u, i) =>
-    L.tileLayer(u, {maxZoom:19, maxNativeZoom:18, attribution: i===0 ? "© Esri, Maxar" : ""})))
+  "Гибрид": L.layerGroup([
+    L.tileLayer(TPL["Гибрид"][0], {maxZoom:19, maxNativeZoom:18, attribution:"© Esri, Maxar, HERE, Garmin, OpenStreetMap"}),
+    new FallbackOverlay(TPL["Гибрид"][1]),
+    new FallbackOverlay(TPL["Гибрид"][2])
+  ])
 };
 let layerName = localStorage.getItem("layer") || "Схема";
 if(layerName === "Спутник") layerName = "Гибрид";
@@ -320,23 +387,30 @@ setFollow(true);
 bFollow.onclick = () => { setFollow(!follow); if(follow && me) map.setView(me, Math.max(map.getZoom(), 14)); };
 map.on("dragstart", () => setFollow(false));
 
+const POOR_ACC_M = 300;   // хуже этого — геопозиция приблизительная
+let lastAcc = null, lastGoodTime = 0;
 function onPos(p){
-  me = [p.coords.latitude, p.coords.longitude];
   const acc = p.coords.accuracy;
+  // Грубую точку (по вышкам/Wi-Fi) не принимаем, если уже была точная и свежая
+  if(acc > POOR_ACC_M * 3 && Date.now() - lastGoodTime < 60000) return;
+  me = [p.coords.latitude, p.coords.longitude];
+  lastAcc = acc;
+  if(acc <= POOR_ACC_M) lastGoodTime = Date.now();
   if(!meMarker){
     meMarker = L.marker(me, {icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[20,20]}), zIndexOffset:1000}).addTo(map);
     meCircle = L.circle(me, {radius:acc, color:"#2f7cf6", weight:1, fillOpacity:.1, interactive:false}).addTo(map);
+    meMarker.on("click", () => showPoint(me, "Я здесь"));
   } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
   if(follow) map.setView(me, firstFix ? 14 : map.getZoom(), {animate:!firstFix});
   firstFix = false;
-  updateStatus(acc);
+  updateStatus();
 }
 function onErr(e){
   setStatus("#777", "Нет геопозиции",
     e.code===1 ? "Доступ запрещён. Разрешите геолокацию для сайта в настройках" : "Ищу спутники… Выйдите на открытое место");
 }
 if("geolocation" in navigator){
-  navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:5000, timeout:30000});
+  navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:0, timeout:30000});
 } else onErr({code:0});
 
 function setStatus(color, t1, t2, warn){
@@ -345,8 +419,15 @@ function setStatus(color, t1, t2, warn){
   document.getElementById("s2").textContent = t2;
   document.getElementById("status").classList.toggle("warn", !!warn);
 }
-function updateStatus(acc){
+function updateStatus(){
   if(!me) return;
+  const acc = lastAcc;
+  if(acc > POOR_ACC_M){
+    setStatus("#e0a33a", `Неточная геопозиция: ±${fmtDist(acc)}`,
+      "Точка может быть далеко от вас. Включите «Точная геопозиция» (см. ❓ в меню) и выйдите на открытое место", true);
+    lastZoneKey = null;
+    return;
+  }
   const here = zones.filter(z => inZone(me[0], me[1], z));
   // приоритет: запрет > закреплённое > общедоступное > другое
   const order = {ban:0, fixed:1, open:2, other:3};
@@ -560,8 +641,10 @@ document.getElementById("mHelp").onclick = () => alert(
 `1. Добавьте приложение на экран «Домой» (Safari → Поделиться → На экран «Домой»).
 2. Загрузите границы: файл KML/GeoJSON/GPX или нарисуйте зону пальцем (можно обходить границу и ставить точки «где я»).
 3. Дома, с интернетом, откройте нужный район и нажмите «Сохранить видимый район». Повторите для каждой подложки, если нужна и схема, и гибрид.
+Если точка стоит не там (в другом районе или области): iPhone — Настройки → Конфиденциальность → Службы геолокации → Сайты Safari → «При использовании» и включить «Точная геопозиция». Android — Настройки → Местоположение → включить «Точное местоположение» / «Улучшение точности» и разрешить точное место для Chrome.
 4. В лесу GPS работает без интернета. Вверху видно, в какой зоне вы и сколько до границы; при переходе через границу телефон вибрирует (на Android).
-5. «Здесь машина» — запомнить место, «Где машина?» — расстояние и направление.`);
+5. «Здесь машина» — запомнить место, «Где машина?» — расстояние и направление.
+6. 🔍 — поиск села или координат. Долгое нажатие на карту — координаты этого места.`);
 
 /* ---------- меню ---------- */
 const sheet = document.getElementById("sheet"), backdrop = document.getElementById("backdrop");
@@ -569,6 +652,106 @@ function openSheet(){ sheet.classList.add("show"); backdrop.classList.add("show"
 function closeSheet(){ sheet.classList.remove("show"); backdrop.classList.remove("show"); }
 document.getElementById("bMenu").onclick = openSheet;
 backdrop.onclick = closeSheet;
+
+/* ---------- поиск: координаты и населённые пункты ---------- */
+const searchEl = document.getElementById("search"), sq = document.getElementById("sq"), sres = document.getElementById("sres");
+const SEARCH_HINT = `<div class="shint">Примеры: <b>Кромы</b>, <b>Дросково</b>, <b>52.9684, 36.0697</b>, <b>52°58'06" 36°04'11"</b>.<br>
+Координаты ищутся и без интернета, сёла и города — только с интернетом.</div>`;
+document.getElementById("bSearch").onclick = () => {
+  searchEl.classList.add("show"); sres.innerHTML = SEARCH_HINT; sq.value = ""; sq.focus();
+};
+document.getElementById("sClose").onclick = closeSearch;
+function closeSearch(){ searchEl.classList.remove("show"); sq.blur(); }
+
+// "52.97, 36.07" / "52,97 36,07" / "52°58'06"N 36°04'11"E" / "52 58.1 36 4.2"
+function parseCoords(s){
+  s = s.trim().replace(/[NnСс]/g, " ").replace(/[EeВв]/g, " ").replace(/[Ss]/g, " -").replace(/[WwЗз]/g, " -");
+  // десятичные с запятой как разделителем дробной части: "52,97 36,07"
+  let m = s.match(/^(-?\d{1,3}[.,]\d+)[\s;]+(-?\d{1,3}[.,]\d+)$/) || s.match(/^(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if(m){
+    const a = parseFloat(m[1].replace(",", ".")), b = parseFloat(m[2].replace(",", "."));
+    if(Math.abs(a) <= 90 && Math.abs(b) <= 180) return [a, b];
+  }
+  // градусы-минуты-секунды
+  const nums = s.match(/-?\d+(?:[.,]\d+)?/g);
+  if(nums && /[°'′"″]|\d\s+\d/.test(s) && (nums.length === 4 || nums.length === 6)){
+    const n = nums.map(v => parseFloat(v.replace(",", ".")));
+    const half = n.length / 2;
+    const dms = arr => { const sign = arr[0] < 0 ? -1 : 1; return sign * (Math.abs(arr[0]) + (arr[1]||0)/60 + (arr[2]||0)/3600); };
+    const a = dms(n.slice(0, half)), b = dms(n.slice(half));
+    if(Math.abs(a) <= 90 && Math.abs(b) <= 180) return [a, b];
+  }
+  return null;
+}
+
+let searchTimer, searchAbort;
+sq.addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 450); });
+sq.addEventListener("keydown", e => { if(e.key === "Enter"){ clearTimeout(searchTimer); runSearch(true); } });
+
+async function runSearch(enter){
+  const q = sq.value.trim();
+  if(!q){ sres.innerHTML = SEARCH_HINT; return; }
+  const c = parseCoords(q);
+  if(c){
+    sres.innerHTML = `<button class="sr" data-lat="${c[0]}" data-lng="${c[1]}">📍 ${fmtCoord(c)}<small>Перейти к точке</small></button>`;
+    if(enter) goTo(c, "Точка по координатам");
+    return;
+  }
+  if(q.length < 2) return;
+  if(!navigator.onLine){ sres.innerHTML = '<div class="shint">Нет интернета: поиск сёл недоступен. Координаты можно искать и без сети.</div>'; return; }
+  sres.innerHTML = '<div class="shint">Ищу…</div>';
+  if(searchAbort) searchAbort.abort();
+  searchAbort = new AbortController();
+  // Сначала ищем в Орловской области, если пусто — по всей России
+  const base = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=10&accept-language=ru&countrycodes=ru&q=";
+  const orel = "&viewbox=34.7,53.75,38.2,52.0&bounded=1";
+  try{
+    let res = await (await fetch(base + encodeURIComponent(q) + orel, {signal:searchAbort.signal})).json();
+    if(!res.length) res = await (await fetch(base + encodeURIComponent(q), {signal:searchAbort.signal})).json();
+    if(!res.length){ sres.innerHTML = '<div class="shint">Ничего не найдено. Проверьте написание.</div>'; return; }
+    sres.innerHTML = res.map(r => {
+      const a = r.address || {};
+      const name = r.name || r.display_name.split(",")[0];
+      const where = [a.municipality || a.county, a.state].filter(Boolean).join(", ");
+      return `<button class="sr" data-lat="${r.lat}" data-lng="${r.lon}" data-name="${esc(name)}">${esc(name)}<small>${esc(where || r.display_name)}</small></button>`;
+    }).join("");
+    if(enter && res.length === 1) goTo([+res[0].lat, +res[0].lon], res[0].name);
+  }catch(err){
+    if(err.name !== "AbortError") sres.innerHTML = '<div class="shint">Поиск не удался, попробуйте ещё раз.</div>';
+  }
+}
+sres.addEventListener("click", e => {
+  const b = e.target.closest(".sr"); if(!b) return;
+  goTo([+b.dataset.lat, +b.dataset.lng], b.dataset.name || "Точка по координатам");
+});
+function goTo(c, title){
+  closeSearch(); setFollow(false);
+  map.setView(c, Math.max(map.getZoom(), 14));
+  showPoint(c, title);
+}
+
+// Карточка точки: координаты, расстояние от меня, копирование
+let pointMarker = null;
+function fmtCoord(c){ return `${c[0].toFixed(5)}, ${c[1].toFixed(5)}`; }
+function showPoint(c, title){
+  if(pointMarker) map.removeLayer(pointMarker);
+  const isMe = title === "Я здесь";
+  const here = zones.filter(z => inZone(c[0], c[1], z)).map(z => `${(CAT[z.cat]||CAT.other).name}: ${esc(z.name)}`);
+  const dist = (!isMe && me) ? `<div>От меня: ${fmtDist(distM(me, c))}</div>` : "";
+  const html = `<div class="pp"><b>${esc(title)}</b><div class="c">${fmtCoord(c)}</div>${dist}
+    <div>${here.length ? here.join("<br>") : "Вне отмеченных зон"}</div>
+    <button data-copy="${fmtCoord(c)}">Копировать координаты</button></div>`;
+  if(isMe){ L.popup().setLatLng(c).setContent(html).openOn(map); return; }
+  pointMarker = L.marker(c).addTo(map).bindPopup(html).openPopup();
+  pointMarker.on("popupclose", () => { if(pointMarker){ map.removeLayer(pointMarker); pointMarker = null; } });
+}
+document.getElementById("map").addEventListener("click", async e => {
+  const b = e.target.closest("[data-copy]"); if(!b) return;
+  try{ await navigator.clipboard.writeText(b.dataset.copy); toast("Координаты скопированы"); }
+  catch{ toast(b.dataset.copy); }
+});
+// Долгое нажатие на карту — координаты этого места
+map.on("contextmenu", e => { if(!drawing) showPoint([e.latlng.lat, e.latlng.lng], "Выбранная точка"); });
 
 /* ---------- утилиты ---------- */
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
