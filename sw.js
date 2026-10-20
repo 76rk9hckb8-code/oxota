@@ -1,5 +1,5 @@
 // Сервис-воркер: приложение и карта работают без интернета
-const APP = "app-v2";
+const APP = "app-v3";
 const TILES = "tiles-v1";
 const APP_FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png",
@@ -47,7 +47,7 @@ self.addEventListener("fetch", e => {
   // Само приложение: сначала сеть (чтобы получать обновления), без сети — из памяти
   // (при слабом сигнале в лесу ждём сеть не дольше 3 секунд)
   const net = Promise.race([
-    fetch(req),
+    fetch(url.origin === location.origin ? new Request(req, { cache: "no-cache" }) : req),
     new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 3000))
   ]);
   e.respondWith(
