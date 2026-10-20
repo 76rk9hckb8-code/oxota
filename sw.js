@@ -1,5 +1,5 @@
 // Сервис-воркер: приложение и карта работают без интернета
-const APP = "app-v1";
+const APP = "app-v2";
 const TILES = "tiles-v1";
 const APP_FILES = [
   "./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-180.png", "./icon-192.png", "./icon-512.png",

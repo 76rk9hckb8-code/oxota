@@ -200,18 +200,28 @@ const DB = (() => {
 
 /* ---------- карта ---------- */
 const map = L.map("map", {zoomControl:false, attributionControl:true}).setView(OREL_CENTER, 8);
+const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+const TPL = {
+  "Схема": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+  // Гибрид: снимок со спутника + дороги + названия сёл, рек, границы
+  "Гибрид": [
+    ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    ESRI + "Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+    ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+  ]
+};
 const layers = {
-  "Схема": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {maxZoom:19, attribution:"© OpenStreetMap"}),
-  "Спутник": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {maxZoom:18, attribution:"© Esri"})
+  "Схема": L.tileLayer(TPL["Схема"][0], {maxZoom:19, attribution:"© OpenStreetMap"}),
+  "Гибрид": L.layerGroup(TPL["Гибрид"].map((u, i) =>
+    L.tileLayer(u, {maxZoom:19, maxNativeZoom:18, attribution: i===0 ? "© Esri, Maxar" : ""})))
 };
 let layerName = localStorage.getItem("layer") || "Схема";
+if(layerName === "Спутник") layerName = "Гибрид";
 if(!layers[layerName]) layerName = "Схема";
 layers[layerName].addTo(map);
 document.getElementById("bLayer").onclick = () => {
   map.removeLayer(layers[layerName]);
-  layerName = layerName === "Схема" ? "Спутник" : "Схема";
+  layerName = layerName === "Схема" ? "Гибрид" : "Схема";
   layers[layerName].addTo(map);
   localStorage.setItem("layer", layerName);
   toast("Подложка: " + layerName);
@@ -503,11 +513,11 @@ document.getElementById("mToCar").onclick = () => {
 /* ---------- офлайн-плитки ---------- */
 function tileUrlsForView(){
   const b = map.getBounds(), z0 = Math.max(map.getZoom(), 10);
-  const urls = [], tpl = layers[layerName]._url, maxZ = Math.min(z0+3, 16);
+  const urls = [], tpls = TPL[layerName], maxZ = Math.min(z0+3, 16);
   const t = (lat,lng,z) => { const n=2**z; return [Math.floor((lng+180)/360*n), Math.floor((1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n)]; };
   for(let z=z0; z<=maxZ; z++){
     const [x1,y1] = t(b.getNorth(), b.getWest(), z), [x2,y2] = t(b.getSouth(), b.getEast(), z);
-    for(let x=x1;x<=x2;x++) for(let y=y1;y<=y2;y++)
+    for(let x=x1;x<=x2;x++) for(let y=y1;y<=y2;y++) for(const tpl of tpls)
       urls.push(tpl.replace("{z}",z).replace("{x}",x).replace("{y}",y).replace("{s}","a"));
   }
   return urls;
@@ -517,7 +527,7 @@ document.getElementById("mCache").onclick = async () => {
   if(!navigator.onLine) return toast("Нужен интернет");
   if(map.getZoom() < 10) return toast("Приблизьте карту к нужному району");
   let urls = tileUrlsForView();
-  if(urls.length > MAX_PREFETCH){ pr.textContent = `Район слишком большой (${urls.length} фрагментов). Приблизьте карту и сохраняйте частями.`; return; }
+  if(urls.length > MAX_PREFETCH * TPL[layerName].length){ pr.textContent = `Район слишком большой (${urls.length} фрагментов). Приблизьте карту и сохраняйте частями.`; return; }
   const cache = await caches.open("tiles-v1");
   let done = 0, fail = 0;
   for(const u of urls){
@@ -549,7 +559,7 @@ document.getElementById("mExport").onclick = async () => {
 document.getElementById("mHelp").onclick = () => alert(
 `1. Добавьте приложение на экран «Домой» (Safari → Поделиться → На экран «Домой»).
 2. Загрузите границы: файл KML/GeoJSON/GPX или нарисуйте зону пальцем (можно обходить границу и ставить точки «где я»).
-3. Дома, с интернетом, откройте нужный район и нажмите «Сохранить видимый район». Повторите для каждой подложки, если нужна и схема, и спутник.
+3. Дома, с интернетом, откройте нужный район и нажмите «Сохранить видимый район». Повторите для каждой подложки, если нужна и схема, и гибрид.
 4. В лесу GPS работает без интернета. Вверху видно, в какой зоне вы и сколько до границы; при переходе через границу телефон вибрирует (на Android).
 5. «Здесь машина» — запомнить место, «Где машина?» — расстояние и направление.`);
 
