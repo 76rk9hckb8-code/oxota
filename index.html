@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Охотзоны Орёл</title>
+<meta name="theme-color" content="#1b2417">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Охотзоны">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --bg:#1b2417; --panel:#232e1e; --panel2:#2c3926; --text:#eef2e8; --muted:#a9b59d;
+    --accent:#e0a33a; --open:#3fa34d; --fixed:#e08a2e; --ban:#d64541; --other:#5b8bd6;
+    --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #map{position:fixed;inset:0}
+  button{font:inherit;color:inherit;border:0;cursor:pointer}
+
+  /* статус сверху */
+  #status{position:fixed;left:12px;right:12px;top:calc(10px + var(--safe-t));z-index:1000;
+    background:var(--panel);border-radius:14px;padding:10px 14px;box-shadow:0 4px 14px #0006;
+    display:flex;gap:10px;align-items:center;min-height:52px}
+  #status .dot{width:14px;height:14px;border-radius:50%;flex:none;background:#777}
+  #status .t1{font-weight:600}
+  #status .t2{font-size:12.5px;color:var(--muted)}
+  #status.warn{outline:2px solid var(--accent)}
+
+  /* кнопки справа */
+  #fab{position:fixed;right:12px;bottom:calc(18px + var(--safe-b));z-index:1000;display:flex;flex-direction:column;gap:10px}
+  .fb{width:54px;height:54px;border-radius:50%;background:var(--panel);box-shadow:0 4px 14px #0006;
+    display:grid;place-items:center;font-size:22px}
+  .fb.on{background:var(--accent);color:#1b1b1b}
+  .fb svg{width:26px;height:26px}
+
+  /* рисование */
+  #drawbar{position:fixed;left:12px;right:80px;bottom:calc(18px + var(--safe-b));z-index:1000;
+    background:var(--panel);border-radius:14px;padding:10px;display:none;gap:8px;flex-wrap:wrap;box-shadow:0 4px 14px #0006}
+  #drawbar.show{display:flex}
+  #drawbar .hint{width:100%;font-size:13px;color:var(--muted)}
+  .btn{background:var(--panel2);padding:10px 14px;border-radius:10px}
+  .btn.pri{background:var(--accent);color:#1b1b1b;font-weight:600}
+  .btn.dan{background:#5a2422}
+
+  /* нижняя панель-меню */
+  #sheet{position:fixed;left:0;right:0;bottom:0;z-index:2000;background:var(--panel);
+    border-radius:18px 18px 0 0;padding:8px 16px calc(16px + var(--safe-b));
+    max-height:82vh;overflow:auto;transform:translateY(105%);transition:transform .25s;box-shadow:0 -6px 20px #0008}
+  #sheet.show{transform:none}
+  #sheet .grip{width:40px;height:5px;border-radius:3px;background:#556;margin:4px auto 10px}
+  #sheet h3{margin:14px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row .btn{flex:1 1 45%;text-align:left}
+  .zone{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #ffffff12}
+  .zone .sw{width:16px;height:16px;border-radius:4px;flex:none}
+  .zone .nm{flex:1;min-width:0}
+  .zone .nm small{display:block;color:var(--muted)}
+  .zone button{background:var(--panel2);border-radius:8px;padding:6px 9px;font-size:13px}
+  #backdrop{position:fixed;inset:0;z-index:1500;background:#0006;display:none}
+  #backdrop.show{display:block}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+  p.note{font-size:13px;color:var(--muted);margin:6px 0}
+  #progress{font-size:13px;color:var(--accent);margin-top:6px}
+
+  /* диалог */
+  dialog{background:var(--panel);color:var(--text);border:0;border-radius:16px;padding:18px;width:min(92vw,420px)}
+  dialog::backdrop{background:#000a}
+  dialog label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  dialog input,dialog select{width:100%;padding:10px;border-radius:10px;border:1px solid #ffffff22;background:var(--panel2);color:var(--text);font:inherit}
+  dialog .row{margin-top:16px}
+
+  #toast{position:fixed;left:50%;bottom:calc(90px + var(--safe-b));transform:translateX(-50%);z-index:3000;
+    background:#000c;padding:10px 16px;border-radius:12px;font-size:14px;display:none;max-width:90vw;text-align:center}
+
+  .me{width:20px;height:20px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 2px #2f7cf655}
+  .car{font-size:24px;line-height:24px;text-align:center;filter:drop-shadow(0 1px 2px #000)}
+  .leaflet-control-attribution{font-size:10px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="status"><div class="dot" id="sdot"></div><div><div class="t1" id="s1">Определяю местоположение…</div><div class="t2" id="s2">Разрешите доступ к геопозиции</div></div></div>
+
+<div id="drawbar">
+  <div class="hint" id="drawhint">Касайтесь карты по границе зоны. Можно ставить точку там, где стоите.</div>
+  <button class="btn" id="dGps">+ Точка где я</button>
+  <button class="btn" id="dUndo">↶ Убрать</button>
+  <button class="btn dan" id="dCancel">Отмена</button>
+  <button class="btn pri" id="dDone">Готово</button>
+</div>
+
+<div id="fab">
+  <button class="fb" id="bLayer" title="Подложка">🗺️</button>
+  <button class="fb" id="bFollow" title="Следовать за мной"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>
+  <button class="fb" id="bMenu" title="Меню">☰</button>
+</div>
+
+<div id="backdrop"></div>
+<div id="sheet">
+  <div class="grip"></div>
+  <div class="legend">
+    <span><i style="background:var(--open)"></i>Общедоступные</span>
+    <span><i style="background:var(--fixed)"></i>Закреплённые</span>
+    <span><i style="background:var(--ban)"></i>Запрет / ООПТ</span>
+    <span><i style="background:var(--other)"></i>Другое</span>
+  </div>
+
+  <h3>Зоны</h3>
+  <div class="row">
+    <button class="btn" id="mImport">📂 Загрузить файл (KML, GeoJSON, GPX)</button>
+    <button class="btn" id="mDraw">✏️ Нарисовать зону</button>
+  </div>
+  <div id="zoneList"></div>
+
+  <h3>Метки</h3>
+  <div class="row">
+    <button class="btn" id="mCar">🚙 Здесь машина</button>
+    <button class="btn" id="mToCar">🧭 Где машина?</button>
+  </div>
+
+  <h3>Без интернета</h3>
+  <p class="note">Карта сохраняется в телефоне, пока вы её смотрите. Перед поездкой, пока есть интернет, откройте нужный район и нажмите кнопку ниже: скачаются детали этого места на несколько уровней приближения.</p>
+  <div class="row">
+    <button class="btn" id="mCache">⬇️ Сохранить видимый район</button>
+    <button class="btn" id="mCacheInfo">ℹ️ Сколько сохранено</button>
+  </div>
+  <div id="progress"></div>
+
+  <h3>Данные</h3>
+  <div class="row">
+    <button class="btn" id="mExport">💾 Резервная копия зон</button>
+    <button class="btn" id="mHelp">❓ Как пользоваться</button>
+  </div>
+  <p class="note">Границы зон в приложении — справочные. Спорные места у кромки угодья сверяйте с официальной схемой Орловской области и путёвкой.</p>
+</div>
+
+<input type="file" id="file" accept=".kml,.geojson,.json,.gpx,application/vnd.google-earth.kml+xml,application/json,application/gpx+xml" hidden>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <div style="font-weight:600;font-size:17px" id="dlgTitle">Зона</div>
+    <label>Название</label>
+    <input id="fName" required placeholder="Например: Мценское ОО">
+    <label>Тип</label>
+    <select id="fCat">
+      <option value="open">Общедоступное угодье (можно)</option>
+      <option value="fixed">Закреплённое угодье (по путёвке)</option>
+      <option value="ban">Запрет / ООПТ / зона охраны</option>
+      <option value="other">Другое</option>
+    </select>
+    <div class="row">
+      <button class="btn" value="cancel" formnovalidate>Отмена</button>
+      <button class="btn pri" value="ok">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+/* ---------- константы ---------- */
+const CAT = {
+  open:  {name:"Общедоступное", color:"#3fa34d", text:"Охота по разрешению в общедоступных угодьях"},
+  fixed: {name:"Закреплённое",  color:"#e08a2e", text:"Нужна путёвка охотпользователя"},
+  ban:   {name:"Запрет / ООПТ", color:"#d64541", text:"Охота запрещена"},
+  other: {name:"Другое",        color:"#5b8bd6", text:""}
+};
+const OREL_CENTER = [52.97, 36.07];
+const NEAR_EDGE_M = 200;          // предупреждать, если до границы меньше
+const MAX_PREFETCH = 600;         // лимит плиток за одно «сохранение района»
+
+/* ---------- хранилище (IndexedDB) ---------- */
+const DB = (() => {
+  let dbp;
+  function open(){
+    if(!dbp) dbp = new Promise((res, rej) => {
+      const r = indexedDB.open("huntzones", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("kv");
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    return dbp;
+  }
+  async function get(k){ const d = await open(); return new Promise((res,rej)=>{ const q=d.transaction("kv").objectStore("kv").get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+  async function set(k,v){ const d = await open(); return new Promise((res,rej)=>{ const t=d.transaction("kv","readwrite"); t.objectStore("kv").put(v,k); t.oncomplete=()=>res(); t.onerror=()=>rej(t.error); }); }
+  return {get,set};
+})();
+
+/* ---------- карта ---------- */
+const map = L.map("map", {zoomControl:false, attributionControl:true}).setView(OREL_CENTER, 8);
+const layers = {
+  "Схема": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {maxZoom:19, attribution:"© OpenStreetMap"}),
+  "Спутник": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {maxZoom:18, attribution:"© Esri"})
+};
+let layerName = localStorage.getItem("layer") || "Схема";
+if(!layers[layerName]) layerName = "Схема";
+layers[layerName].addTo(map);
+document.getElementById("bLayer").onclick = () => {
+  map.removeLayer(layers[layerName]);
+  layerName = layerName === "Схема" ? "Спутник" : "Схема";
+  layers[layerName].addTo(map);
+  localStorage.setItem("layer", layerName);
+  toast("Подложка: " + layerName);
+};
+
+/* ---------- зоны ---------- */
+let zones = [];          // {id,name,cat,rings:[[[lat,lng]...] , ...polygons]} -> polys: [ [outer, hole...] ]
+const zoneGroup = L.layerGroup().addTo(map);
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function drawZones(){
+  zoneGroup.clearLayers();
+  for(const z of zones){
+    const c = (CAT[z.cat]||CAT.other).color;
+    const poly = L.polygon(z.polys, {color:c, weight:2, fillColor:c, fillOpacity:z.cat==="ban"?0.28:0.18});
+    poly.bindPopup(`<b>${esc(z.name)}</b><br>${(CAT[z.cat]||CAT.other).name}`);
+    poly.addTo(zoneGroup);
+  }
+  renderList();
+  updateStatus();
+}
+async function saveZones(){ await DB.set("zones", zones); }
+
+function renderList(){
+  const el = document.getElementById("zoneList");
+  if(!zones.length){ el.innerHTML = '<p class="note">Зон пока нет. Загрузите файл с границами или нарисуйте зону.</p>'; return; }
+  el.innerHTML = zones.map(z => `
+    <div class="zone">
+      <div class="sw" style="background:${(CAT[z.cat]||CAT.other).color}"></div>
+      <div class="nm">${esc(z.name)}<small>${(CAT[z.cat]||CAT.other).name}</small></div>
+      <button data-a="show" data-id="${z.id}">Показать</button>
+      <button data-a="edit" data-id="${z.id}">✎</button>
+      <button data-a="del" data-id="${z.id}">🗑</button>
+    </div>`).join("");
+}
+document.getElementById("zoneList").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if(!b) return;
+  const z = zones.find(x => x.id === b.dataset.id); if(!z) return;
+  if(b.dataset.a === "show"){ closeSheet(); map.fitBounds(L.polygon(z.polys).getBounds(), {padding:[30,30]}); }
+  if(b.dataset.a === "edit"){
+    const r = await askZone("Изменить зону", z.name, z.cat); if(!r) return;
+    z.name = r.name; z.cat = r.cat; await saveZones(); drawZones();
+  }
+  if(b.dataset.a === "del" && confirm(`Удалить «${z.name}»?`)){
+    zones = zones.filter(x => x !== z); await saveZones(); drawZones();
+  }
+});
+
+/* ---------- геометрия ---------- */
+function inRing(lat, lng, ring){
+  let inside = false;
+  for(let i=0, j=ring.length-1; i<ring.length; j=i++){
+    const [yi,xi] = ring[i], [yj,xj] = ring[j];
+    if(((yi>lat)!==(yj>lat)) && (lng < (xj-xi)*(lat-yi)/(yj-yi)+xi)) inside = !inside;
+  }
+  return inside;
+}
+function inZone(lat, lng, z){
+  return z.polys.some(p => inRing(lat,lng,p[0]) && !p.slice(1).some(h => inRing(lat,lng,h)));
+}
+// расстояние до ближайшей границы зоны, метры (локальная проекция)
+function distToEdge(lat, lng, z){
+  const ky = 111320, kx = 111320*Math.cos(lat*Math.PI/180);
+  let best = Infinity;
+  for(const p of z.polys) for(const ring of p){
+    for(let i=0;i<ring.length;i++){
+      const a = ring[i], b = ring[(i+1)%ring.length];
+      const ax=(a[1]-lng)*kx, ay=(a[0]-lat)*ky, bx=(b[1]-lng)*kx, by=(b[0]-lat)*ky;
+      const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+      let t = L2 ? -(ax*dx+ay*dy)/L2 : 0; t = Math.max(0,Math.min(1,t));
+      const d = Math.hypot(ax+t*dx, ay+t*dy);
+      if(d<best) best=d;
+    }
+  }
+  return best;
+}
+function distM(a, b){
+  const R=6371000, toR=Math.PI/180;
+  const dLat=(b[0]-a[0])*toR, dLng=(b[1]-a[1])*toR;
+  const s=Math.sin(dLat/2)**2+Math.cos(a[0]*toR)*Math.cos(b[0]*toR)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function bearing(a, b){
+  const toR=Math.PI/180, y=Math.sin((b[1]-a[1])*toR)*Math.cos(b[0]*toR);
+  const x=Math.cos(a[0]*toR)*Math.sin(b[0]*toR)-Math.sin(a[0]*toR)*Math.cos(b[0]*toR)*Math.cos((b[1]-a[1])*toR);
+  return (Math.atan2(y,x)/toR+360)%360;
+}
+function fmtDist(m){ return m<1000 ? Math.round(m)+" м" : (m/1000).toFixed(m<10000?1:0)+" км"; }
+
+/* ---------- GPS ---------- */
+let me = null, meMarker = null, meCircle = null, follow = true, lastZoneKey = null, firstFix = true;
+const bFollow = document.getElementById("bFollow");
+function setFollow(v){ follow = v; bFollow.classList.toggle("on", v); }
+setFollow(true);
+bFollow.onclick = () => { setFollow(!follow); if(follow && me) map.setView(me, Math.max(map.getZoom(), 14)); };
+map.on("dragstart", () => setFollow(false));
+
+function onPos(p){
+  me = [p.coords.latitude, p.coords.longitude];
+  const acc = p.coords.accuracy;
+  if(!meMarker){
+    meMarker = L.marker(me, {icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[20,20]}), zIndexOffset:1000}).addTo(map);
+    meCircle = L.circle(me, {radius:acc, color:"#2f7cf6", weight:1, fillOpacity:.1, interactive:false}).addTo(map);
+  } else { meMarker.setLatLng(me); meCircle.setLatLng(me).setRadius(acc); }
+  if(follow) map.setView(me, firstFix ? 14 : map.getZoom(), {animate:!firstFix});
+  firstFix = false;
+  updateStatus(acc);
+}
+function onErr(e){
+  setStatus("#777", "Нет геопозиции",
+    e.code===1 ? "Доступ запрещён. Разрешите геолокацию для сайта в настройках" : "Ищу спутники… Выйдите на открытое место");
+}
+if("geolocation" in navigator){
+  navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:5000, timeout:30000});
+} else onErr({code:0});
+
+function setStatus(color, t1, t2, warn){
+  document.getElementById("sdot").style.background = color;
+  document.getElementById("s1").textContent = t1;
+  document.getElementById("s2").textContent = t2;
+  document.getElementById("status").classList.toggle("warn", !!warn);
+}
+function updateStatus(acc){
+  if(!me) return;
+  const here = zones.filter(z => inZone(me[0], me[1], z));
+  // приоритет: запрет > закреплённое > общедоступное > другое
+  const order = {ban:0, fixed:1, open:2, other:3};
+  here.sort((a,b) => order[a.cat]-order[b.cat]);
+  const accTxt = acc ? ` · точность ±${Math.round(acc)} м` : "";
+  let key;
+  if(here.length){
+    const z = here[0], c = CAT[z.cat]||CAT.other;
+    const edge = distToEdge(me[0], me[1], z);
+    const near = edge < NEAR_EDGE_M;
+    key = z.id;
+    setStatus(c.color, `${c.name}: ${z.name}`,
+      (near ? `⚠️ До границы ${fmtDist(edge)}` : `До границы ${fmtDist(edge)}`) + accTxt, near);
+  } else {
+    key = "none";
+    let nearest = null, nd = Infinity;
+    for(const z of zones){ const d = distToEdge(me[0], me[1], z); if(d<nd){nd=d; nearest=z;} }
+    setStatus("#777", zones.length ? "Вне отмеченных зон" : "Зоны не загружены",
+      (nearest ? `Ближайшая: ${nearest.name}, ${fmtDist(nd)}` : "Откройте меню ☰ и добавьте границы") + accTxt);
+  }
+  if(lastZoneKey !== null && key !== lastZoneKey){
+    if(navigator.vibrate) navigator.vibrate([200,100,200]);
+    toast(key==="none" ? "Вы вышли из отмеченной зоны" : "Новая зона: " + document.getElementById("s1").textContent);
+  }
+  lastZoneKey = key;
+}
+
+/* ---------- импорт файлов ---------- */
+document.getElementById("mImport").onclick = () => document.getElementById("file").click();
+document.getElementById("file").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if(!f) return;
+  try{
+    const text = await f.text();
+    let items;
+    if(/\.(geo)?json$/i.test(f.name) || text.trim().startsWith("{")) items = parseGeoJSON(JSON.parse(text));
+    else if(/\.gpx$/i.test(f.name) || text.includes("<gpx")) items = parseGPX(text);
+    else items = parseKML(text);
+    if(!items.length){ toast("В файле не нашлось полигонов"); return; }
+    const needCat = items.some(i => !i.cat);
+    let cat = "open";
+    if(needCat){
+      const r = await askZone(`Найдено зон: ${items.length}. Какой у них тип?`, f.name.replace(/\.\w+$/,""), "open", true);
+      if(!r) return; cat = r.cat;
+    }
+    for(const it of items) zones.push({id:uid(), name:it.name || f.name, cat:it.cat || cat, polys:it.polys});
+    await saveZones(); drawZones();
+    map.fitBounds(L.featureGroup(zoneGroup.getLayers()).getBounds(), {padding:[20,20]});
+    setFollow(false); closeSheet();
+    toast(`Добавлено зон: ${items.length}`);
+  }catch(err){ console.error(err); toast("Не удалось прочитать файл"); }
+};
+function guessCat(s){
+  s = (s||"").toLowerCase();
+  if(/общедоступ/.test(s)) return "open";
+  if(/закреп|охотхоз|охотпольз/.test(s)) return "fixed";
+  if(/запрет|оопт|заповед|заказник|охран|ban/.test(s)) return "ban";
+  return null;
+}
+function parseKML(text){
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const out = [];
+  const ringOf = el => (el?.textContent||"").trim().split(/\s+/).map(t => t.split(",").map(Number)).filter(a => a.length>=2 && !isNaN(a[0])).map(a => [a[1],a[0]]);
+  for(const pm of doc.getElementsByTagName("Placemark")){
+    const name = pm.getElementsByTagName("name")[0]?.textContent?.trim() || "";
+    const desc = pm.getElementsByTagName("description")[0]?.textContent || "";
+    const polys = [];
+    for(const pg of pm.getElementsByTagName("Polygon")){
+      const outer = ringOf(pg.getElementsByTagName("outerBoundaryIs")[0]?.getElementsByTagName("coordinates")[0]);
+      const holes = [...pg.getElementsByTagName("innerBoundaryIs")].map(ib => ringOf(ib.getElementsByTagName("coordinates")[0]));
+      if(outer.length>=3) polys.push([outer, ...holes.filter(h=>h.length>=3)]);
+    }
+    if(!polys.length) for(const ls of [...pm.getElementsByTagName("LineString"), ...pm.getElementsByTagName("LinearRing")]){
+      const r = ringOf(ls.getElementsByTagName("coordinates")[0]); if(r.length>=3) polys.push([r]);
+    }
+    if(polys.length) out.push({name, cat:guessCat(name+" "+desc), polys});
+  }
+  return out;
+}
+function parseGeoJSON(gj){
+  const feats = gj.type==="FeatureCollection" ? gj.features : gj.type==="Feature" ? [gj] : [{type:"Feature",properties:{},geometry:gj}];
+  const sw = r => r.map(c => [c[1], c[0]]);
+  const out = [];
+  for(const f of feats){
+    const g = f.geometry; if(!g) continue;
+    let polys = [];
+    if(g.type==="Polygon") polys = [g.coordinates.map(sw)];
+    else if(g.type==="MultiPolygon") polys = g.coordinates.map(p => p.map(sw));
+    else continue;
+    const pr = f.properties||{};
+    const name = pr.name || pr.Name || pr.NAME || pr.title || "";
+    const cat = CAT[pr.category] ? pr.category : guessCat(name + " " + (pr.description||"") + " " + (pr.type||""));
+    out.push({name, cat, polys});
+  }
+  return out;
+}
+function parseGPX(text){
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  const out = [];
+  const groups = [...doc.getElementsByTagName("trk"), ...doc.getElementsByTagName("rte")];
+  for(const g of groups){
+    const name = g.getElementsByTagName("name")[0]?.textContent?.trim() || "";
+    const pts = [...g.querySelectorAll("trkpt, rtept")].map(p => [+p.getAttribute("lat"), +p.getAttribute("lon")]);
+    if(pts.length>=3) out.push({name, cat:guessCat(name), polys:[[pts]]});
+  }
+  return out;
+}
+
+/* ---------- рисование зоны ---------- */
+let drawPts = [], drawLine = null, drawing = false;
+const drawbar = document.getElementById("drawbar");
+function startDraw(){
+  drawing = true; drawPts = []; closeSheet(); setFollow(false);
+  drawbar.classList.add("show");
+  drawLine = L.polygon([], {color:"#e0a33a", weight:3, dashArray:"6 6", fillOpacity:.1}).addTo(map);
+}
+function redraw(){ drawLine.setLatLngs(drawPts); document.getElementById("drawhint").textContent = `Точек: ${drawPts.length}. Касайтесь карты по границе зоны.`; }
+function stopDraw(){ drawing = false; drawbar.classList.remove("show"); if(drawLine) map.removeLayer(drawLine); drawLine = null; }
+map.on("click", e => { if(!drawing) return; drawPts.push([e.latlng.lat, e.latlng.lng]); redraw(); });
+document.getElementById("mDraw").onclick = startDraw;
+document.getElementById("dUndo").onclick = () => { drawPts.pop(); redraw(); };
+document.getElementById("dGps").onclick = () => { if(!me) return toast("Нет геопозиции"); drawPts.push([...me]); redraw(); };
+document.getElementById("dCancel").onclick = stopDraw;
+document.getElementById("dDone").onclick = async () => {
+  if(drawPts.length < 3) return toast("Нужно минимум 3 точки");
+  const r = await askZone("Новая зона", "", "open"); if(!r) return;
+  zones.push({id:uid(), name:r.name, cat:r.cat, polys:[[drawPts.slice()]]});
+  stopDraw(); await saveZones(); drawZones();
+};
+
+/* ---------- диалог зоны ---------- */
+function askZone(title, name, cat, nameOptional){
+  return new Promise(res => {
+    const d = document.getElementById("dlg");
+    document.getElementById("dlgTitle").textContent = title;
+    const fn = document.getElementById("fName"); fn.value = name||""; fn.required = !nameOptional;
+    fn.parentElement.querySelector("label").style.display = nameOptional ? "none" : "";
+    fn.style.display = nameOptional ? "none" : "";
+    document.getElementById("fCat").value = cat||"open";
+    d.onclose = () => res(d.returnValue==="ok" ? {name:fn.value.trim()||name, cat:document.getElementById("fCat").value} : null);
+    d.returnValue = ""; d.showModal();
+  });
+}
+
+/* ---------- машина ---------- */
+let car = null, carMarker = null;
+function drawCar(){
+  if(carMarker) map.removeLayer(carMarker);
+  if(car) carMarker = L.marker(car, {icon:L.divIcon({className:"", html:'<div class="car">🚙</div>', iconSize:[28,28]})}).addTo(map);
+}
+document.getElementById("mCar").onclick = async () => {
+  if(!me) return toast("Нет геопозиции");
+  car = [...me]; await DB.set("car", car); drawCar(); toast("Место машины сохранено");
+};
+document.getElementById("mToCar").onclick = () => {
+  if(!car) return toast("Метка машины не поставлена");
+  closeSheet();
+  if(!me){ map.setView(car, 15); return; }
+  const deg = Math.round(bearing(me, car));
+  const dirs = ["С","СВ","В","ЮВ","Ю","ЮЗ","З","СЗ"];
+  toast(`Машина: ${fmtDist(distM(me, car))}, направление ${dirs[Math.round(deg/45)%8]} (${deg}°)`);
+  setFollow(false); map.fitBounds(L.latLngBounds([me, car]), {padding:[60,60]});
+};
+
+/* ---------- офлайн-плитки ---------- */
+function tileUrlsForView(){
+  const b = map.getBounds(), z0 = Math.max(map.getZoom(), 10);
+  const urls = [], tpl = layers[layerName]._url, maxZ = Math.min(z0+3, 16);
+  const t = (lat,lng,z) => { const n=2**z; return [Math.floor((lng+180)/360*n), Math.floor((1-Math.log(Math.tan(lat*Math.PI/180)+1/Math.cos(lat*Math.PI/180))/Math.PI)/2*n)]; };
+  for(let z=z0; z<=maxZ; z++){
+    const [x1,y1] = t(b.getNorth(), b.getWest(), z), [x2,y2] = t(b.getSouth(), b.getEast(), z);
+    for(let x=x1;x<=x2;x++) for(let y=y1;y<=y2;y++)
+      urls.push(tpl.replace("{z}",z).replace("{x}",x).replace("{y}",y).replace("{s}","a"));
+  }
+  return urls;
+}
+document.getElementById("mCache").onclick = async () => {
+  const pr = document.getElementById("progress");
+  if(!navigator.onLine) return toast("Нужен интернет");
+  if(map.getZoom() < 10) return toast("Приблизьте карту к нужному району");
+  let urls = tileUrlsForView();
+  if(urls.length > MAX_PREFETCH){ pr.textContent = `Район слишком большой (${urls.length} фрагментов). Приблизьте карту и сохраняйте частями.`; return; }
+  const cache = await caches.open("tiles-v1");
+  let done = 0, fail = 0;
+  for(const u of urls){
+    try{ if(!(await cache.match(u))){ const r = await fetch(u, {mode:"cors"}); if(r.ok) await cache.put(u, r); else fail++; } }
+    catch{ fail++; }
+    done++; if(done%10===0 || done===urls.length) pr.textContent = `Сохранено ${done} из ${urls.length}` + (fail?`, ошибок ${fail}`:"");
+  }
+  pr.textContent = `Готово: район сохранён (${urls.length} фрагментов, подложка «${layerName}»).`;
+};
+document.getElementById("mCacheInfo").onclick = async () => {
+  const keys = await (await caches.open("tiles-v1")).keys();
+  let est = "";
+  if(navigator.storage?.estimate){ const e = await navigator.storage.estimate(); est = `, занято ~${Math.round(e.usage/1048576)} МБ`; }
+  document.getElementById("progress").textContent = `В памяти ${keys.length} фрагментов карты${est}.`;
+};
+
+/* ---------- экспорт ---------- */
+document.getElementById("mExport").onclick = async () => {
+  const gj = {type:"FeatureCollection", features:zones.map(z => ({type:"Feature",
+    properties:{name:z.name, category:z.cat},
+    geometry:{type:"MultiPolygon", coordinates:z.polys.map(p => p.map(r => r.map(([a,b]) => [b,a])))}}))};
+  const blob = new Blob([JSON.stringify(gj)], {type:"application/geo+json"});
+  const file = new File([blob], "ohotzony-orel.geojson", {type:"application/geo+json"});
+  if(navigator.canShare?.({files:[file]})) { try{ await navigator.share({files:[file], title:"Охотзоны"}); return; }catch{} }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; a.click();
+};
+
+/* ---------- справка ---------- */
+document.getElementById("mHelp").onclick = () => alert(
+`1. Добавьте приложение на экран «Домой» (Safari → Поделиться → На экран «Домой»).
+2. Загрузите границы: файл KML/GeoJSON/GPX или нарисуйте зону пальцем (можно обходить границу и ставить точки «где я»).
+3. Дома, с интернетом, откройте нужный район и нажмите «Сохранить видимый район». Повторите для каждой подложки, если нужна и схема, и спутник.
+4. В лесу GPS работает без интернета. Вверху видно, в какой зоне вы и сколько до границы; при переходе через границу телефон вибрирует (на Android).
+5. «Здесь машина» — запомнить место, «Где машина?» — расстояние и направление.`);
+
+/* ---------- меню ---------- */
+const sheet = document.getElementById("sheet"), backdrop = document.getElementById("backdrop");
+function openSheet(){ sheet.classList.add("show"); backdrop.classList.add("show"); }
+function closeSheet(){ sheet.classList.remove("show"); backdrop.classList.remove("show"); }
+document.getElementById("bMenu").onclick = openSheet;
+backdrop.onclick = closeSheet;
+
+/* ---------- утилиты ---------- */
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+let toastT;
+function toast(m){ const t = document.getElementById("toast"); t.textContent = m; t.style.display = "block"; clearTimeout(toastT); toastT = setTimeout(() => t.style.display = "none", 3500); }
+
+/* ---------- старт ---------- */
+(async () => {
+  zones = (await DB.get("zones")) || [];
+  car = (await DB.get("car")) || null;
+  drawZones(); drawCar();
+  if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+  if(navigator.storage?.persist) navigator.storage.persist();
+})();
+</script>
+</body>
+</html>
